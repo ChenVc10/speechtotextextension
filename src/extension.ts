@@ -27,12 +27,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register GitHub login command
     const githubLoginCommand = vscode.commands.registerCommand('speechtotextextension.githubLogin', () => {
-        startOAuth();  // Start GitHub OAuth process
+        startOAuth();
     });
     context.subscriptions.push(githubLoginCommand);
 }
 
-// Function to display the login page
+// Function to display the login page with only GitHub login
 function showLoginPanel(context: vscode.ExtensionContext) {
     const panel = vscode.window.createWebviewPanel(
         'login', // Identifier
@@ -44,26 +44,17 @@ function showLoginPanel(context: vscode.ExtensionContext) {
     );
 
     panel.webview.html = getLoginHtml();
-    console.log('Login panel opened'); // Debug information
+    console.log('Login panel opened');
 
     // Listen for messages from Webview
     panel.webview.onDidReceiveMessage(
         async (message) => {
-            console.log('Received message from Webview:', message); // Debug information
-            switch (message.command) {
-                case 'login':
-                    handleLogin(message.email, message.password, panel);
-                    break;
-                case 'githubLogin':
-                    await handleGithubLogin(panel);  // Start GitHub OAuth process
-                    break;
-                case 'buttonClicked':
-                    vscode.window.showInformationMessage('Button clicked in the second page!');
-                    break;
-                case 'signOut':
-                    console.log('Signing out...'); // Debug information
-                    panel.webview.html = getLoginHtml(); // Return to login page
-                    break;
+            console.log('Received message from Webview:', message);
+            if (message.command === 'githubLogin') {
+                await handleGithubLogin(panel);  // Start GitHub OAuth process
+            } else if (message.command === 'signOut') {
+                console.log('Signing out...');
+                panel.webview.html = getLoginHtml(); // Return to login page
             }
         },
         undefined,
@@ -91,24 +82,14 @@ function showLoginPanel(context: vscode.ExtensionContext) {
     );
 }
 
-// Handle regular login
-function handleLogin(email: string, password: string, panel: vscode.WebviewPanel) {
-    if (email && password) {
-        panel.webview.html = getButtonPageHtml(); // Update page upon successful login
-    } else {
-        panel.webview.postMessage({ command: 'loginResult', success: false, message: 'Please enter email and password.' });
-    }
-}
-
 // Start GitHub OAuth process
 function handleGithubLogin(panel: vscode.WebviewPanel) {
-    console.log('Handling GitHub login'); // Debug information
+    console.log('Handling GitHub login');
     startOAuth();  // Start GitHub OAuth process
 }
 
 // Exchange GitHub authorization code for access token
 async function exchangeCodeForToken(code: string, panel: vscode.WebviewPanel) {
-    const clientId = 'Ov23liJYWKXe7wm6NH32';
     const clientSecret = 'e6e84217da73eb6a065005db82eaa6f1589de618';
 
     const postData = querystring.stringify({
@@ -156,6 +137,123 @@ async function exchangeCodeForToken(code: string, panel: vscode.WebviewPanel) {
     });
 }
 
+const Mic = require('mic');
+
+let micInstance: any = null;
+
+function startRecording(panel: vscode.WebviewPanel) {
+    if (micInstance) {
+        vscode.window.showInformationMessage('Recording is already in progress.');
+        return;
+    }
+
+    micInstance = Mic({
+        rate: '16000', // 采样率
+        channels: '1', // 单声道
+        debug: false
+    });
+
+    const micInputStream = micInstance.getAudioStream();
+
+    // 监听麦克风数据
+    micInputStream.on('data', (data: Buffer) => {
+        panel.webview.postMessage({
+            type: 'audio',
+            audioData: data.toString('base64') // 将音频数据编码为 Base64
+        });
+    });
+
+    micInstance.start();
+    panel.webview.postMessage({ type: 'status', message: 'Recording started.' });
+    vscode.window.showInformationMessage('Recording started.');
+}
+
+function stopRecording(panel: vscode.WebviewPanel) {
+    if (micInstance) {
+        micInstance.stop();
+        micInstance = null;
+        panel.webview.postMessage({ type: 'status', message: 'Recording stopped.' });
+        vscode.window.showInformationMessage('Recording stopped.');
+    } else {
+        vscode.window.showInformationMessage('No recording in progress.');
+    }
+}
+
+
+
+function getSpeechToTextHtml(): string {
+    return `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>Speech to Text</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    padding: 20px;
+                    background-color: #333;
+                    color: #FFF;
+                }
+                #output {
+                    margin: 20px 0;
+                    padding: 10px;
+                    border: 1px solid #FFF;
+                    height: 200px;
+                    overflow-y: auto;
+                }
+                button {
+                    padding: 10px 20px;
+                    font-size: 16px;
+                    color: #FFF;
+                    background-color: #007ACC;
+                    border: none;
+                    border-radius: 4px;
+                    cursor: pointer;
+                }
+                button:hover {
+                    background-color: #005A9E;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Speech to Text</h1>
+            <button id="recordButton">Start Recording</button>
+            <div id="output">Waiting for audio...</div>
+            <script>
+                const vscode = acquireVsCodeApi();
+                let isRecording = false;
+                const button = document.getElementById('recordButton');
+                const output = document.getElementById('output');
+
+                button.addEventListener('click', () => {
+                    if (isRecording) {
+                        vscode.postMessage({ command: 'stopRecording' });
+                        button.textContent = 'Start Recording';
+                    } else {
+                        vscode.postMessage({ command: 'startRecording' });
+                        button.textContent = 'Stop Recording';
+                    }
+                    isRecording = !isRecording;
+                });
+
+                // 接收主进程发送的消息
+                window.addEventListener('message', event => {
+                    const message = event.data;
+                    if (message.type === 'status') {
+                        output.innerHTML += '<p>' + message.message + '</p>';
+                    } else if (message.type === 'audio') {
+                        output.innerHTML += '<p>Audio received: ' + atob(message.audioData).length + ' bytes</p>';
+                    }
+                });
+            </script>
+        </body>
+        </html>
+    `;
+}
+
+
+
 // Return HTML content for the login page
 function getLoginHtml(): string {
     return `
@@ -188,17 +286,6 @@ function getLoginHtml(): string {
                     font-size: 1.8em;
                     font-weight: 400;
                 }
-                input { 
-                    width: 100%; 
-                    padding: 10px; 
-                    margin: 8px 0; 
-                    box-sizing: border-box; 
-                    background-color: #444; 
-                    border: 1px solid #555;
-                    border-radius: 4px;
-                    color: #FFF;
-                    font-size: 0.9em;
-                }
                 .button {
                     width: 100%; 
                     padding: 10px; 
@@ -218,20 +305,11 @@ function getLoginHtml(): string {
         </head>
         <body>
             <div class="container">
-                <h2>Speech to Text</h2>
-                <input type="email" id="email" placeholder="Email" required>
-                <input type="password" id="password" placeholder="Password" required>
-                <button class="button" onclick="login()">Login</button>
+                <h2>Login with GitHub</h2>
                 <button class="button" onclick="githubLogin()">Login with GitHub</button>
             </div>
             <script>
                 const vscode = acquireVsCodeApi();
-                
-                function login() {
-                    const email = document.getElementById('email').value;
-                    const password = document.getElementById('password').value;
-                    vscode.postMessage({ command: 'login', email, password });
-                }
                 
                 function githubLogin() {
                     vscode.postMessage({ command: 'githubLogin' });
@@ -242,8 +320,8 @@ function getLoginHtml(): string {
     `;
 }
 
-// Return HTML content for the button page
-function getButtonPageHtml(): string {
+
+function getButtonPageHtml() {
     return `
         <!DOCTYPE html>
         <html lang="en">
@@ -325,35 +403,83 @@ function getButtonPageHtml(): string {
                 <p>Speech output will appear here...</p>
             </div>
 
-            <button class="button" onclick="onButtonClick()">Start Speech Recognition</button>
+            <button class="button" onclick="startSpeechRecognition()">Start Speech Recognition</button>
 
             <script>
                 const vscode = acquireVsCodeApi();
-                
-                function onButtonClick() {
-                    vscode.postMessage({ command: 'buttonClicked' });
+                let socket;
+                let fullSentences = [];
+                let mic_available = false;
+
+                function displayRealtimeText(message) {
+                    const container = document.getElementById('speechContainer');
+                    container.innerHTML += "<p>" + message + "</p>";
+                    container.scrollTop = container.scrollHeight;
                 }
 
-                function signOut() {
-                    vscode.postMessage({ command: 'signOut' });
+                function startSpeechRecognition() {
+                    navigator.mediaDevices.getUserMedia({ audio: true })
+                        .then(stream => {
+                            mic_available = true;
+                            displayRealtimeText("Microphone access granted. Start speaking...");
+
+                            const audioContext = new AudioContext();
+                            const source = audioContext.createMediaStreamSource(stream);
+                            const processor = audioContext.createScriptProcessor(256, 1, 1);
+
+                            source.connect(processor);
+                            processor.connect(audioContext.destination);
+
+                            processor.onaudioprocess = function(e) {
+                                const inputData = e.inputBuffer.getChannelData(0);
+                                const outputData = new Int16Array(inputData.length);
+
+                                for (let i = 0; i < inputData.length; i++) {
+                                    outputData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                                }
+
+                                if (socket && socket.readyState === WebSocket.OPEN) {
+                                    const metadata = JSON.stringify({ sampleRate: audioContext.sampleRate });
+                                    const metadataBytes = new TextEncoder().encode(metadata);
+                                    const metadataLength = new ArrayBuffer(4);
+                                    const metadataLengthView = new DataView(metadataLength);
+                                    metadataLengthView.setInt32(0, metadataBytes.byteLength, true);
+
+                                    const combinedData = new Blob([metadataLength, metadataBytes, outputData.buffer]);
+                                    socket.send(combinedData);
+                                }
+                            };
+                        })
+                        .catch(error => {
+                            displayRealtimeText("Microphone access denied. Error: " + error.message);
+                        });
                 }
 
                 function viewHistory() {
                     vscode.postMessage({ command: 'viewHistory' });
                 }
 
-                // Future implementation for real-time update of speechContainer
-                window.addEventListener('message', event => {
-                    const message = event.data;
-                    if (message.command === 'updateSpeech') {
-                        document.getElementById('speechContainer').textContent = message.text;
-                    }
-                });
+                function signOut() {
+                    vscode.postMessage({ command: 'signOut' });
+                }
+
+                window.onload = function() {
+                    socket = new WebSocket("ws://127.0.0.1:9001");
+                    socket.onopen = () => displayRealtimeText("Connected to server.");
+                    socket.onclose = () => displayRealtimeText("Disconnected from server.");
+                    socket.onerror = () => displayRealtimeText("Error connecting to server.");
+                };
             </script>
         </body>
         </html>
     `;
 }
+
+
+
+
+
+
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
