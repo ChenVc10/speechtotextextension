@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Microphone Access</title>
+</head>
+<body>
+    <h1>Microphone Access Test</h1>
+    <button onclick="requestMicrophoneAccess()">Request Microphone Access</button>
+    <script>
+        function requestMicrophoneAccess() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    console.log("Microphone access granted");
+                    stream.getTracks().forEach(track => track.stop());
+                })
+                .catch(error => {
+                    console.error("Error accessing microphone:", error.message);
+                });
+        }
+    </script>
+</body>
+</html>
