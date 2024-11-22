@@ -1,23 +1,307 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Test Microphone Access</title>
+   <title>Speech to Text Test</title>
+   <style>
+       body { 
+           font-family: Arial; 
+           padding: 20px;
+           max-width: 1000px;
+           margin: 0 auto;
+           background-color: #f5f5f5;
+       }
+       .container {
+           display: flex;
+           flex-direction: column;
+           gap: 20px;
+       }
+       #realtimeText {
+           border: 1px solid #ccc;
+           padding: 15px;
+           margin: 10px 0;
+           min-height: 300px;
+           max-height: 500px;
+           background-color: #fff;
+           border-radius: 5px;
+           overflow-y: auto;
+           white-space: pre-wrap;
+           font-size: 16px;
+           line-height: 1.5;
+           box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+       }
+       #confirmationDialog {
+           display: none;
+           border: 1px solid #ddd;
+           padding: 20px;
+           margin-top: 20px;
+           background-color: #fff;
+           box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+           border-radius: 5px;
+       }
+       .button-group {
+           display: flex;
+           gap: 10px;
+           margin: 10px 0;
+       }
+       button {
+           padding: 10px 20px;
+           cursor: pointer;
+           border: none;
+           border-radius: 5px;
+           background-color: #007bff;
+           color: white;
+           font-size: 14px;
+           transition: background-color 0.2s;
+       }
+       button:hover {
+           opacity: 0.9;
+       }
+       button:disabled {
+           background-color: #ccc;
+           cursor: not-allowed;
+       }
+       button.confirm { background-color: #28a745; }
+       button.cancel { background-color: #dc3545; }
+       .status {
+           color: #666;
+           font-style: italic;
+           margin: 10px 0;
+       }
+       .recording {
+           color: #dc3545;
+           font-weight: bold;
+       }
+       #finalText {
+           max-height: 400px;
+           overflow-y: auto;
+           padding: 15px;
+           background: #f8f9fa;
+           border-radius: 5px;
+           margin: 15px 0;
+           white-space: pre-wrap;
+       }
+   </style>
 </head>
 <body>
-    <h1>Microphone Access Test</h1>
-    <button onclick="requestMicrophoneAccess()">Request Microphone Access</button>
-    <script>
-        function requestMicrophoneAccess() {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    console.log("Microphone access granted");
-                    stream.getTracks().forEach(track => track.stop());
-                })
-                .catch(error => {
-                    console.error("Error accessing microphone:", error.message);
-                });
-        }
-    </script>
+   <div class="container">
+       <h1>Speech to Text</h1>
+       <div class="status" id="status">Ready to start</div>
+       
+       <div class="button-group">
+           <button id="startBtn">Start Recording</button>
+           <button id="stopBtn" disabled>Stop Recording</button>
+       </div>
+
+       <div>
+           <h3>Real-time Recognition:</h3>
+           <div id="realtimeText">Waiting for speech...</div>
+       </div>
+
+       <div id="confirmationDialog">
+           <h3>Confirm Text</h3>
+           <p>Is this the text you want to use?</p>
+           <div id="finalText"></div>
+           <div class="button-group">
+               <button class="confirm" id="confirmBtn">Confirm</button>
+               <button class="cancel" id="cancelBtn">Cancel</button>
+           </div>
+       </div>
+   </div>
+
+   <script>
+       let websocket = null;
+       let audioContext = null;
+       let micStream = null;
+       let processor = null;
+       let isRecording = false;
+       let currentText = '';
+       let isResetting = false;
+
+       const status = document.getElementById('status');
+       const startBtn = document.getElementById('startBtn');
+       const stopBtn = document.getElementById('stopBtn');
+       const realtimeText = document.getElementById('realtimeText');
+       const confirmationDialog = document.getElementById('confirmationDialog');
+       const finalText = document.getElementById('finalText');
+       const confirmBtn = document.getElementById('confirmBtn');
+       const cancelBtn = document.getElementById('cancelBtn');
+
+       async function setupWebSocket() {
+           try {
+               if (websocket) {
+                   websocket.close();
+               }
+
+               websocket = new WebSocket('ws://localhost:9001');
+               
+               websocket.onopen = () => {
+                   status.textContent = 'Connected to server';
+                   startBtn.disabled = false;
+               };
+
+               websocket.onerror = (error) => {
+                   status.textContent = 'Connection error';
+                   startBtn.disabled = true;
+               };
+
+               websocket.onclose = () => {
+                   if (!isResetting) {
+                       status.textContent = 'Disconnected';
+                       if (isRecording) {
+                           stopRecording();
+                       }
+                       setTimeout(setupWebSocket, 1000);
+                   }
+               };
+
+               websocket.onmessage = (event) => {
+                   try {
+                       const data = JSON.parse(event.data);
+                       if (data.type === 'realtime') {
+                           currentText = data.text;
+                           realtimeText.textContent = currentText;
+                       }
+                   } catch (e) {
+                       console.error('Error parsing message:', e);
+                   }
+               };
+           } catch (error) {
+               console.error('WebSocket setup error:', error);
+               setTimeout(setupWebSocket, 1000);
+           }
+       }
+
+       async function startRecording() {
+           try {
+               if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                   await setupWebSocket();
+               }
+
+               const stream = await navigator.mediaDevices.getUserMedia({ 
+                   audio: {
+                       echoCancellation: true,
+                       noiseSuppression: true,
+                       autoGainControl: true
+                   } 
+               });
+               
+               micStream = stream;
+               audioContext = new AudioContext({sampleRate: 16000});
+               const source = audioContext.createMediaStreamSource(stream);
+               processor = audioContext.createScriptProcessor(1024, 1, 1);
+
+               processor.onaudioprocess = (e) => {
+                   if (websocket && websocket.readyState === WebSocket.OPEN && isRecording) {
+                       const inputData = e.inputBuffer.getChannelData(0);
+                       const outputData = new Int16Array(inputData.length);
+                       
+                       for (let i = 0; i < inputData.length; i++) {
+                           outputData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                       }
+
+                       const metadata = JSON.stringify({
+                           sampleRate: audioContext.sampleRate
+                       });
+                       const metadataBytes = new TextEncoder().encode(metadata);
+                       const metadataLength = new ArrayBuffer(4);
+                       const metadataLengthView = new DataView(metadataLength);
+                       metadataLengthView.setInt32(0, metadataBytes.byteLength, true);
+
+                       const combinedData = new Blob([metadataLength, metadataBytes, outputData.buffer]);
+                       websocket.send(combinedData);
+                   }
+               };
+
+               source.connect(processor);
+               processor.connect(audioContext.destination);
+
+               isRecording = true;
+               startBtn.disabled = true;
+               stopBtn.disabled = false;
+               status.textContent = '🔴 Recording...';
+               status.classList.add('recording');
+               confirmationDialog.style.display = 'none';
+               realtimeText.textContent = 'Waiting for speech...';
+
+           } catch (error) {
+               status.textContent = 'Error: ' + error.message;
+               await stopRecording();
+           }
+       }
+
+       async function stopRecording() {
+           isRecording = false;
+
+           if (processor) {
+               processor.disconnect();
+               processor = null;
+           }
+
+           if (audioContext) {
+               await audioContext.close();
+               audioContext = null;
+           }
+
+           if (micStream) {
+               micStream.getTracks().forEach(track => track.stop());
+               micStream = null;
+           }
+
+           startBtn.disabled = false;
+           stopBtn.disabled = true;
+           status.textContent = 'Recording stopped';
+           status.classList.remove('recording');
+
+           if (!isResetting) {
+               finalText.textContent = currentText;
+               confirmationDialog.style.display = 'block';
+           }
+       }
+
+       async function resetConnection() {
+           isResetting = true;
+           if (websocket) {
+               websocket.close();
+           }
+           websocket = null;
+           await setupWebSocket();
+           isResetting = false;
+           startBtn.disabled = false;
+       }
+
+       function handleConfirm() {
+           console.log('Confirmed text:', currentText);
+           status.textContent = 'Text confirmed. Ready to start new recording.';
+           confirmationDialog.style.display = 'none';
+           currentText = '';
+           realtimeText.textContent = 'Waiting for speech...';
+           resetConnection();
+       }
+
+       function handleCancel() {
+           currentText = '';
+           confirmationDialog.style.display = 'none';
+           realtimeText.textContent = 'Waiting for speech...';
+           status.textContent = 'Ready to start';
+           resetConnection();
+       }
+
+       startBtn.addEventListener('click', startRecording);
+       stopBtn.addEventListener('click', stopRecording);
+       confirmBtn.addEventListener('click', handleConfirm);
+       cancelBtn.addEventListener('click', handleCancel);
+
+       window.onbeforeunload = async () => {
+           if (isRecording) {
+               await stopRecording();
+           }
+           if (websocket) {
+               websocket.close();
+           }
+       };
+
+       // 初始连接
+       setupWebSocket();
+   </script>
 </body>
 </html>

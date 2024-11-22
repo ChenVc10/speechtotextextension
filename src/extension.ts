@@ -9,13 +9,17 @@ const redirectUri = 'vscode://speech2code.speechtotextextension/callback';
 // Keep track of the login panel
 let loginPanel: vscode.WebviewPanel | undefined;
 
-export function startOAuth() {
-    const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=read:user`;
-    vscode.env.openExternal(vscode.Uri.parse(url));
-}
-
 export function activate(context: vscode.ExtensionContext) {
     console.log('Congratulations, your extension "speechtotextextension" is now active!');
+
+    // Create status bar item
+    const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
+    statusBarItem.text = "$(unmute) Speech To Text";
+    statusBarItem.tooltip = "Click to start speech recognition";
+    statusBarItem.command = 'speechtotextextension.showLogin';
+    statusBarItem.show();
+    
+    context.subscriptions.push(statusBarItem);
 
     // Register commands
     const commands = [
@@ -55,6 +59,11 @@ export function activate(context: vscode.ExtensionContext) {
     );
 }
 
+function startOAuth() {
+    const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=read:user`;
+    vscode.env.openExternal(vscode.Uri.parse(url));
+}
+
 function showLoginPanel(context: vscode.ExtensionContext) {
     if (loginPanel) {
         loginPanel.reveal();
@@ -67,8 +76,8 @@ function showLoginPanel(context: vscode.ExtensionContext) {
         vscode.ViewColumn.One,
         {
             enableScripts: true,
-            enableFindWidget: true,
             retainContextWhenHidden: true,
+            enableFindWidget: true,
             localResourceRoots: [],
             portMapping: [{
                 webviewPort: 9001,
@@ -307,7 +316,7 @@ function getButtonPageHtml(): string {
             const statusMessage = document.getElementById('statusMessage');
             const startButton = document.getElementById('startButton');
             const stopButton = document.getElementById('stopButton');
-
+            
             function updateStatus(message) {
                 statusMessage.textContent = message;
                 console.log(message);
@@ -327,6 +336,16 @@ function getButtonPageHtml(): string {
                 speechContainer.appendChild(errorElement);
             }
 
+            async function checkMicrophonePermission() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    stream.getTracks().forEach(track => track.stop());
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            }
+
             startButton.addEventListener('click', async () => {
                 if (socket && socket.readyState === WebSocket.OPEN) {
                     updateStatus("WebSocket is already open.");
@@ -334,22 +353,26 @@ function getButtonPageHtml(): string {
                 }
 
                 try {
+                    // Check microphone permission first
+                    const hasMicPermission = await checkMicrophonePermission();
+                    if (!hasMicPermission) {
+                        throw new Error('Microphone permission denied');
+                    }
+
                     updateStatus("Requesting microphone access...");
-                    
-                    // Request microphone access with specific constraints
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         audio: {
                             echoCancellation: true,
                             noiseSuppression: true,
-                            autoGainControl: true
+                            autoGainControl: true,
+                            channelCount: 1
                         } 
                     });
                     
                     updateStatus("Microphone access granted.");
-                    
                     micStream = stream;
                     audioContext = new AudioContext();
-                    const source = audioContext.createMediaStreamSource(micStream);
+                    const source = audioContext.createMediaStreamSource(stream);
                     const processor = audioContext.createScriptProcessor(256, 1, 1);
 
                     processor.onaudioprocess = (event) => {
@@ -376,7 +399,7 @@ function getButtonPageHtml(): string {
                     processor.connect(audioContext.destination);
 
                     updateStatus("Connecting to WebSocket server...");
-                    socket = new WebSocket("ws://127.0.0.1:9001");
+                    socket = new WebSocket("ws://localhost:9001");
 
                     socket.onopen = () => {
                         updateStatus("Connected to WebSocket server.");
@@ -496,5 +519,13 @@ function handleStopRecording() {
 export function deactivate() {
     if (loginPanel) {
         loginPanel.dispose();
+    }
+    if (micInstance) {
+        try {
+            micInstance.stop();
+            micInstance = null;
+        } catch (error) {
+            console.error('Error stopping recording during deactivation:', error);
+        }
     }
 }
