@@ -29,7 +29,7 @@ export function activate(context: vscode.ExtensionContext) {
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
     statusBarItem.text = "$(unmute) Speech To Text";
     statusBarItem.tooltip = "Click to start speech recognition";
-    statusBarItem.command = 'speechtotextextension.showSpeechUI';
+    statusBarItem.command = 'speechtotextextension.showLogin';
     statusBarItem.show();
     
     context.subscriptions.push(statusBarItem);
@@ -41,7 +41,7 @@ export function activate(context: vscode.ExtensionContext) {
         
         if (currentEditor && wsManager) {
             const context: FileContext = {
-                userId: 'user-id', // Replace with actual user ID from GitHub
+                userId: 'user-id', // Will be replaced with GitHub user ID after login
                 conversationId: Date.now().toString(),
                 fileName: currentEditor.document.fileName,
                 content: currentEditor.document.getText(),
@@ -56,9 +56,19 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register commands
     const commands = [
-        vscode.commands.registerCommand('speechtotextextension.showSpeechUI', () => {
+        vscode.commands.registerCommand('speechtotextextension.showLogin', () => {
+            // 显示登录界面
             webviewPanel = new WebviewPanel(context);
             webviewPanel.show();
+            // 确保显示登录界面
+            webviewPanel.showLoginPage();
+        }),
+        vscode.commands.registerCommand('speechtotextextension.showSpeechUI', () => {
+            if (webviewPanel) {
+                webviewPanel.updateToSpeechUI();
+            } else {
+                vscode.window.showErrorMessage('Please login first');
+            }
         }),
         vscode.commands.registerCommand('speechtotextextension.githubLogin', () => {
             startOAuth();
@@ -71,15 +81,17 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(...commands);
 
-    // Register URI handler for OAuth callback
+    // Register URI handler for GitHub OAuth callback
     context.subscriptions.push(
         vscode.window.registerUriHandler({
             handleUri(uri: vscode.Uri) {
                 const code = uri.query.split('=')[1];
                 if (code) {
                     exchangeCodeForToken(code).then((token) => {
-                        if (token && webviewPanel) {
+                        if (token) {
                             vscode.window.showInformationMessage('Successfully logged in to GitHub!');
+                            // 登录成功后自动切换到语音识别界面
+                            vscode.commands.executeCommand('speechtotextextension.showSpeechUI');
                         }
                     }).catch(() => {
                         vscode.window.showErrorMessage('Failed to exchange code for token.');
@@ -125,6 +137,7 @@ function startOAuth() {
     const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=read:user`;
     vscode.env.openExternal(vscode.Uri.parse(url));
 }
+
 
 async function exchangeCodeForToken(code: string): Promise<string> {
     const postData = querystring.stringify({

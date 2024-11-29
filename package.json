@@ -7,21 +7,28 @@
   "engines": {
     "vscode": "^1.94.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [
-    "onCommand:speechtotextextension.showSpeechUI",
-    "onCommand:speechtotextextension.githubLogin"
+    "onCommand:speechtotextextension.showLogin",
+    "onCommand:speechtotextextension.githubLogin",
+    "onCommand:speechtotextextension.showSpeechUI"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "speechtotextextension.showSpeechUI",
-        "title": "Show Speech UI"
+        "command": "speechtotextextension.showLogin",
+        "title": "Show Login"
       },
       {
         "command": "speechtotextextension.githubLogin",
         "title": "GitHub Login"
+      },
+      {
+        "command": "speechtotextextension.showSpeechUI",
+        "title": "Show Speech UI"
       },
       {
         "command": "speechtotextextension.startRecording",

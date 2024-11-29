@@ -26,3 +26,8 @@ export interface EditorContext {
         character: number;
     };
 }
+
+export interface AuthState {
+    isLoggedIn: boolean;
+    token?: string;
+}

@@ -1,8 +1,10 @@
+// webview.ts
 import * as vscode from 'vscode';
 import * as path from 'path';
 
 export class WebviewPanel {
     private panel: vscode.WebviewPanel | undefined;
+    private isLoggedIn: boolean = false;
 
     constructor(private context: vscode.ExtensionContext) {}
 
@@ -19,6 +21,7 @@ export class WebviewPanel {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
+                enableFindWidget: true,
                 localResourceRoots: [
                     vscode.Uri.file(path.join(this.context.extensionPath, 'media'))
                 ],
@@ -29,7 +32,8 @@ export class WebviewPanel {
             }
         );
 
-        this.panel.webview.html = this.getHtmlContent();
+        // Initially show login page
+        this.panel.webview.html = this.getLoginHtml();
         this.setupMessageHandling();
 
         this.panel.onDidDispose(() => {
@@ -41,25 +45,35 @@ export class WebviewPanel {
         if (!this.panel) return;
 
         this.panel.webview.onDidReceiveMessage(
-            message => {
+            async (message) => {
                 switch (message.command) {
+                    case 'githubLogin':
+                        vscode.commands.executeCommand('speechtotextextension.githubLogin');
+                        break;
                     case 'startRecording':
                         vscode.commands.executeCommand('speechtotextextension.startRecording');
                         break;
                     case 'stopRecording':
                         vscode.commands.executeCommand('speechtotextextension.stopRecording');
                         break;
-                    case 'confirmText':
-                        vscode.commands.executeCommand('speechtotextextension.confirmText', message.text);
-                        break;
-                    case 'cancelText':
-                        vscode.commands.executeCommand('speechtotextextension.cancelText');
-                        break;
                 }
             },
             undefined,
             this.context.subscriptions
         );
+    }
+
+    public showLoginPage() {
+        if (this.panel) {
+            this.panel.webview.html = this.getLoginHtml();
+        }
+    }
+
+    public updateToSpeechUI() {
+        if (this.panel) {
+            this.isLoggedIn = true;
+            this.panel.webview.html = this.getSpeechHtml();
+        }
     }
 
     public updateStatus(message: string) {
@@ -79,7 +93,72 @@ export class WebviewPanel {
             });
         }
     }
-    private getHtmlContent(): string {
+
+    private getLoginHtml(): string {
+        return `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ws: wss:; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
+            <title>Login</title>
+            <style>
+                body { 
+                    font-family: Arial, sans-serif; 
+                    padding: 20px; 
+                    color: #FFFFFF; 
+                    background-color: #333; 
+                    display: flex; 
+                    align-items: center; 
+                    justify-content: center; 
+                    height: 100vh; 
+                    margin: 0;
+                }
+                .container { 
+                    max-width: 320px; 
+                    width: 100%;
+                    text-align: center; 
+                }
+                h2 {
+                    margin-bottom: 30px;
+                    color: #E0E0E0;
+                    font-size: 1.8em;
+                    font-weight: 400;
+                }
+                .button {
+                    width: 100%; 
+                    padding: 10px; 
+                    margin: 10px 0; 
+                    background-color: rgba(255, 255, 255, 0.1); 
+                    color: #E0E0E0; 
+                    border: 1px solid #666; 
+                    border-radius: 4px; 
+                    cursor: pointer;
+                    font-size: 0.9em;
+                    transition: background-color 0.3s;
+                }
+                .button:hover {
+                    background-color: rgba(255, 255, 255, 0.2);
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>Login with GitHub</h2>
+                <button class="button" onclick="githubLogin()">Login with GitHub</button>
+            </div>
+            <script>
+                const vscode = acquireVsCodeApi();
+                
+                function githubLogin() {
+                    vscode.postMessage({ command: 'githubLogin' });
+                }
+            </script>
+        </body>
+        </html>`;
+    }
+
+    private getSpeechHtml(): string {
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
@@ -323,4 +402,3 @@ export class WebviewPanel {
         }
     }
 }
-

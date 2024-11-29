@@ -1,7 +1,5 @@
-import WebSocket = require('ws');  // 修改导入方式
-// 或者使用
-// import { WebSocket, WebSocketServer } from 'ws';
-
+// websocket.ts
+import WebSocket = require('ws');
 import { WebSocketMessage, FileContext } from './types';
 import * as vscode from 'vscode';
 
