@@ -7,19 +7,29 @@
   "engines": {
     "vscode": "^1.94.0"
   },
-  "categories": [
-    "Other"
+  "categories": ["Other"],
+  "activationEvents": [
+    "onCommand:speechtotextextension.showSpeechUI",
+    "onCommand:speechtotextextension.githubLogin"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "speechtotextextension.helloWorld",
-        "title": "Hello World"
+        "command": "speechtotextextension.showSpeechUI",
+        "title": "Show Speech UI"
       },
       {
-        "command": "speechtotextextension.showLogin",
-        "title": "Show Login"
+        "command": "speechtotextextension.githubLogin",
+        "title": "GitHub Login"
+      },
+      {
+        "command": "speechtotextextension.startRecording",
+        "title": "Start Recording"
+      },
+      {
+        "command": "speechtotextextension.stopRecording",
+        "title": "Stop Recording"
       }
     ]
   },
@@ -41,6 +51,7 @@
     "@types/mocha": "^10.0.9",
     "@types/node": "20.x",
     "@types/vscode": "^1.95.0",
+    "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^8.10.0",
     "@typescript-eslint/parser": "^8.7.0",
     "@vscode/test-cli": "^0.0.10",
@@ -51,6 +62,7 @@
     "typescript": "^5.6.3"
   },
   "dependencies": {
-    "mic": "^2.1.2"
+    "mic": "^2.1.2",
+    "ws": "^8.16.0"
   }
 }
